@@ -285,6 +285,12 @@
     <ClInclude Include="addons\chaos\group.h">
       <Filter>Header Files\addons\chaos</Filter>
     </ClInclude>
+    <ClInclude Include="string_utils.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="speedometer.h">
+      <Filter>Header Files\addons</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp">
@@ -472,6 +478,9 @@
     </ClCompile>
     <ClCompile Include="addons\chaos\effects\level\train.cpp">
       <Filter>Source Files\addons\chaos\effects\level</Filter>
+    </ClCompile>
+    <ClCompile Include="speedometer.cpp">
+      <Filter>Source Files\addons</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

@@ -1,11 +1,8 @@
 ﻿#include "trainer.h"
-#include "../engine.h"
 #include "../hook.h"
-#include "../imgui/imgui.h"
 #include "../menu.h"
 #include "../pattern.h"
-#include "../settings.h"
-#include "../util.h"
+#include "../speedometer.h"
 
 #pragma warning (push)
 #pragma warning (disable: 4244)
@@ -19,6 +16,7 @@ static bool StrangToolActivated = false;
 static bool ToggleResetKeybinds = false;
 static bool ShowToolActivatedOverlay = true;
 
+static Speedometer speedometer;
 static Trainer::Save save;
 static bool HasSave = false;
 
@@ -38,25 +36,6 @@ static int StrangKeybind = 0;
 static int SidestepBeamerRightKeybind = 0;
 static int SidestepBeamerLeftKeybind = 0;
 
-static bool HasCheckpoint = false;
-static float CheckpointTime = 0.0f;
-static bool CheckpointUpdateTimer = false;
-static Classes::FVector CheckpointLocation;
-
-static struct 
-{
-    bool Show;
-    bool HideCloseButton;
-
-    bool ShowEditWindow;
-    bool ShowItemEditorWindow;
-    bool WasEditWindowShown;
-    bool WasEditItemShown;
-
-    ImGuiWindowFlags WindowFlags;
-    ImGuiStyle Style;
-} Speedometer;
-
 static struct
 {
     bool Enabled = false;
@@ -72,320 +51,6 @@ static struct
     float SpeedIncrement = 0.25f;
     bool ResetSpeed = true;
 } Fly;
-
-class Item
-{
-public:
-    int DrawIndex;
-    int PositionIndex;
-    bool IsVisible;
-    bool ModifyDisplayedValue;
-    bool Multiply;
-    float Factor;
-    bool AddSpaceBelow;
-    float Height;
-    float ValueOffset;
-
-    std::string ItemName;
-    std::string Label;
-    std::string Format;
-
-    ImVec4 LabelColor;
-    ImVec4 ValueColor;
-
-private:
-    char LabelBuffer[32];
-    char FormatBuffer[32];
-    int DefaultPositionIndex;
-    int PreviousPositionIndex;
-    std::string DefaultLabel;
-    std::string DefaultFormat;
-
-public:
-    template<typename T> 
-    void Draw(T value)
-    {
-        if (!IsVisible)
-        {
-            return;
-        }
-
-        ImGui::BeginWindow("Speedometer##trainer-speedometer");
-
-        ImGui::TextColored(LabelColor, Label.c_str());
-        ImGui::SameLine(ValueOffset);
-
-        if (ModifyDisplayedValue)
-        {
-            if (Multiply)
-            {
-                value *= Factor;
-            }
-            else
-            {
-                value /= Factor == 0.0f ? 1.0f : Factor;
-            }
-        }
-        
-        ImGui::TextColored(ValueColor, Format.c_str(), value);
-
-        if (AddSpaceBelow)
-        {
-            ImGui::DummyVertical(Height);
-        }
-
-        ImGui::End();
-    }
-
-    void Edit(bool &needsToReorderItems)
-    {
-        ImGui::Text("Editing \"%s\"", ItemName.c_str());
-        ImGui::Separator(5.0f);
-
-        /*
-        ImGui::Text("DrawIndex: %d", DrawIndex);
-        ImGui::Text("PositionIndex: %d", PositionIndex);
-        ImGui::Text("DefaultPositionIndex: %d", DefaultPositionIndex);
-        ImGui::Text("PreviousPositionIndex: %d", PreviousPositionIndex);
-        ImGui::Separator(5.0f);
-        */
-
-        ImGui::Checkbox("IsVisible", &IsVisible);
-        ImGui::HelpMarker("If set to true, it will be hidden, otherwise it will be visible");
-
-        // Text
-        {
-            ImGui::Separator(5.0f);
-            if (ImGui::InputText("Label", LabelBuffer, sizeof(Label), ImGuiInputTextFlags_EnterReturnsTrue))
-            {
-                if (Label != LabelBuffer)
-                {
-                    bool empty = true;
-                    for (auto c : std::string(LabelBuffer)) 
-                    {
-                        if (!isblank(c)) 
-                        {
-                            empty = false;
-                            break;
-                        }
-                    }
-
-                    if (!empty) 
-                    {
-                        Label = LabelBuffer;
-                    }
-                }
-            }
-            ImGui::HelpMarker(("Change the label text to be whatever you want. Default Label: " + DefaultLabel).c_str());
-
-            if (ImGui::InputText("Value Format", FormatBuffer, sizeof(Format), ImGuiInputTextFlags_EnterReturnsTrue))
-            {
-                if (Format != FormatBuffer)
-                {
-                    bool empty = true;
-                    for (auto c : std::string(FormatBuffer))
-                    {
-                        if (!isblank(c))
-                        {
-                            empty = false;
-                            break;
-                        }
-                    }
-
-                    if (!empty)
-                    {
-                        Format = FormatBuffer;
-                    }
-                }
-            }
-            ImGui::HelpMarker(("All format values requires one \"%\". If you're not sure how to change this. Look up \"Format Specifiers\". You can add whatever you want before and after the specifier.\n\nDefault Format: " + DefaultFormat).c_str());
-        }
-
-        // Spacing
-        {
-            ImGui::Separator(5.0f);
-            ImGui::Checkbox("Add Space Below", &AddSpaceBelow);
-
-            if (!AddSpaceBelow)
-                ImGui::BeginDisabled();
-
-            ImGui::DragFloat("Height", &Height);
-
-            if (!AddSpaceBelow)
-                ImGui::EndDisabled();
-
-            ImGui::DragFloat("Value Offset", &ValueOffset);
-            ImGui::HelpMarker("Offset from the left side of the speedometer window");
-        }
-
-        // Value
-        {
-            ImGui::Separator(5.0f);
-            ImGui::Checkbox("Modify Displayed Value", &ModifyDisplayedValue);
-
-            if (!ModifyDisplayedValue) 
-                ImGui::BeginDisabled();
-
-            ImGui::Checkbox("Multiply Value", &Multiply);
-            ImGui::HelpMarker("If set to true, it will multiply the value with the factor. If set to false, it will divide instead");
-
-            ImGui::InputFloat("Factor", &Factor);
-
-            if (!ModifyDisplayedValue) 
-                ImGui::EndDisabled();
-        }
-
-        // Color
-        {
-            ImGui::Separator(5.0f);
-            ImGui::ColorEdit4("Label Color", &LabelColor.x, ImGuiColorEditFlags_AlphaPreviewHalf);
-            ImGui::ColorEdit4("Value Color", &ValueColor.x, ImGuiColorEditFlags_AlphaPreviewHalf);
-        }
-
-        // Buttons
-        {
-            ImGui::Separator(5.0f);
-            if (ImGui::Button("Save##speedometer-edititem-save-button"))
-            {
-                SaveSettings();
-            }
-            ImGui::SameLine();
-
-            if (ImGui::Button("Undo##speedometer-edititem-undo-button"))
-            {
-                LoadSettings(DrawIndex, false, true);
-                needsToReorderItems = true;
-            }
-            ImGui::SameLine();
-
-            if (ImGui::Button("Reset##speedometer-edititem-reset-button"))
-            {
-                Settings::SetSetting({ "Speedometer", "Item", ItemName }, json::object());
-
-                LoadSettings(DrawIndex, true); 
-                SaveSettings();
-            }
-        }
-    }
-
-    void LoadSettings(size_t index, bool resetToDefaultPositionIndex = false, bool resetToPreviousPositionIndex = false)
-    {
-        DrawIndex = Settings::GetSetting({ "Speedometer", "Item", ItemName, "DrawIndex" }, index);
-
-        int positionIndex = index;
-        if (resetToDefaultPositionIndex)
-        {
-            positionIndex = DefaultPositionIndex;
-        }
-        else if (resetToPreviousPositionIndex)
-        {
-            positionIndex = PreviousPositionIndex;
-        }
-
-        PositionIndex = Settings::GetSetting({ "Speedometer", "Item", ItemName, "PositionIndex" }, positionIndex);
-        IsVisible = Settings::GetSetting({ "Speedometer", "Item", ItemName, "IsVisible" }, true);
-        ModifyDisplayedValue = Settings::GetSetting({ "Speedometer", "Item", ItemName, "ModifyDisplayedValue" }, false);
-        Multiply = Settings::GetSetting({ "Speedometer", "Item", ItemName, "Multiply" }, false);
-        Factor = Settings::GetSetting({ "Speedometer", "Item", ItemName, "Factor" }, 1.0f);
-        AddSpaceBelow = Settings::GetSetting({ "Speedometer", "Item", ItemName, "AddSpaceBelow" }, false);
-        Height = Settings::GetSetting({ "Speedometer", "Item", ItemName, "Height" }, 5.0f);
-        ValueOffset = Settings::GetSetting({ "Speedometer", "Item", ItemName, "ValueOffset" }, 128.0f);
-
-        Label = Settings::GetSetting({ "Speedometer", "Item", ItemName, "Label" }, DefaultLabel).get<std::string>();
-        strncpy_s(LabelBuffer, sizeof(LabelBuffer) - 1, Label.c_str(), sizeof(LabelBuffer) - 1);
-
-        Format = Settings::GetSetting({ "Speedometer", "Item", ItemName, "Format" }, DefaultFormat).get<std::string>();
-        strncpy_s(FormatBuffer, sizeof(FormatBuffer) - 1, Format.c_str(), sizeof(FormatBuffer) - 1);
-
-        LabelColor = JsonToImVec4(Settings::GetSetting({ "Speedometer", "Item", ItemName, "LabelColor" }, ImVec4ToJson(ImVec4(1.0f, 1.0f, 1.0f, 1.0f))));
-        ValueColor = JsonToImVec4(Settings::GetSetting({ "Speedometer", "Item", ItemName, "ValueColor" }, ImVec4ToJson(ImVec4(1.0f, 1.0f, 1.0f, 1.0f))));
-    }
-
-    void SaveSettings()
-    {
-        Settings::SetSetting({ "Speedometer", "Item", ItemName, "DrawIndex" }, DrawIndex);
-        Settings::SetSetting({ "Speedometer", "Item", ItemName, "PositionIndex" }, PreviousPositionIndex = PositionIndex);
-        Settings::SetSetting({ "Speedometer", "Item", ItemName, "IsVisible" }, IsVisible);
-        Settings::SetSetting({ "Speedometer", "Item", ItemName, "ModifyDisplayedValue" }, ModifyDisplayedValue);
-        Settings::SetSetting({ "Speedometer", "Item", ItemName, "Multiply" }, Multiply);
-        Settings::SetSetting({ "Speedometer", "Item", ItemName, "Factor" }, Factor);
-        Settings::SetSetting({ "Speedometer", "Item", ItemName, "AddSpaceBelow" }, AddSpaceBelow);
-        Settings::SetSetting({ "Speedometer", "Item", ItemName, "Height" }, Height);
-        Settings::SetSetting({ "Speedometer", "Item", ItemName, "ValueOffset" }, ValueOffset);
-        Settings::SetSetting({ "Speedometer", "Item", ItemName, "Label" }, Label);
-        Settings::SetSetting({ "Speedometer", "Item", ItemName, "Format" }, Format);
-        Settings::SetSetting({ "Speedometer", "Item", ItemName, "LabelColor" }, ImVec4ToJson(LabelColor));
-        Settings::SetSetting({ "Speedometer", "Item", ItemName, "ValueColor" }, ImVec4ToJson(ValueColor));
-    }
-
-    void SetNameAndDefaults(const std::string name, const std::string label, int &positionIndex, const std::string format = "%.2f") 
-    {
-        ItemName = name;
-        DefaultLabel = Label = label;
-        DefaultFormat = Format = format;
-        DefaultPositionIndex = PreviousPositionIndex = PositionIndex = positionIndex;
-
-        positionIndex++;
-    }
-};
-
-static Item LocationX;
-static Item LocationY;
-static Item LocationZ;
-static Item TopHeight;
-static Item Speed;
-static Item TopSpeed;
-static Item Pitch;
-static Item Yaw;
-static Item Checkpoint;
-static Item MovementState;
-static Item Health;
-static Item ReactionTime;
-static Item LastJumpLocation;
-static Item LastJumpLocationDelta;
-static std::vector<Item*> Items;
-
-template<typename T> 
-struct Tracker
-{
-    T Value;
-    float TimeHit;
-    float ResetAfterSeconds;
-
-    Tracker()
-    {
-        Value = std::numeric_limits<T>::lowest();
-        TimeHit = 0.0f;
-        ResetAfterSeconds = 2.75f; // 2.75f Comes from checking how long it took for the original speedometer to reset
-    }
-
-    void Reset()
-    {
-        Value = std::numeric_limits<T>::lowest();
-        TimeHit = 0.0f;
-    }
-
-    void Update(const T current)
-    {
-        const auto pawn = Engine::GetPlayerPawn();
-        if (pawn)
-        {
-            if (pawn->WorldInfo->RealTimeSeconds - TimeHit > ResetAfterSeconds)
-            {
-                Reset();
-            }
-
-            if (current > Value)
-            {
-                Value = current;
-                TimeHit = pawn->WorldInfo->RealTimeSeconds;
-            }
-        }
-    }
-};
-
-static Tracker<float> TopHeightTracker;
-static Tracker<float> TopSpeedTracker;
 
 static void(__thiscall *StateHandlerOriginal)(void *, float, int) = nullptr;
 
@@ -693,137 +358,6 @@ static void Load(Trainer::Save &save, Classes::ATdPlayerPawn *pawn, Classes::ATd
     // clang-format on
 }
 
-static void SortItemsOrder()
-{
-    std::sort(Items.begin(), Items.end(), [](Item* a, Item* b)
-    {
-        return a->PositionIndex < b->PositionIndex;
-    });
-}
-
-static void SaveSpeedometerWindowSettings(bool saveItemColors)
-{
-    Settings::SetSetting({ "Speedometer", "Settings", "Show" }, Speedometer.Show);
-    Settings::SetSetting({ "Speedometer", "Settings", "HideCloseButton" }, Speedometer.HideCloseButton);
-    Settings::SetSetting({ "Speedometer", "Settings", "WindowFlags" }, Speedometer.WindowFlags);
-    Settings::SetSetting({ "Speedometer", "Style", "WindowRounding" }, Speedometer.Style.WindowRounding);
-    Settings::SetSetting({ "Speedometer", "Style", "WindowBorderSize" }, Speedometer.Style.WindowBorderSize);
-    Settings::SetSetting({ "Speedometer", "Style", "BorderColor" }, ImVec4ToJson(Speedometer.Style.Colors[ImGuiCol_Border]));
-    Settings::SetSetting({ "Speedometer", "Style", "TitleBackgroundColor" }, ImVec4ToJson(Speedometer.Style.Colors[ImGuiCol_TitleBg]));
-    Settings::SetSetting({ "Speedometer", "Style", "WindowBackgroundColor" }, ImVec4ToJson(Speedometer.Style.Colors[ImGuiCol_WindowBg]));
-
-    for (size_t i = 0; i < Items.size() && saveItemColors; i++)
-    {
-        Settings::SetSetting({ "Speedometer", "Item", Items[i]->ItemName, "LabelColor" }, ImVec4ToJson(Items[i]->LabelColor));
-        Settings::SetSetting({ "Speedometer", "Item", Items[i]->ItemName, "ValueColor" }, ImVec4ToJson(Items[i]->ValueColor));
-    }
-}
-
-static void LoadSpeedometerWindowSettings(bool loadItemColors)
-{
-    Speedometer.Show = Settings::GetSetting({ "Speedometer", "Settings", "Show" }, false);
-    Speedometer.HideCloseButton = Settings::GetSetting({ "Speedometer", "Settings", "HideCloseButton" }, false);
-    Speedometer.WindowFlags = Settings::GetSetting({ "Speedometer", "Settings", "WindowFlags" }, static_cast<ImGuiWindowFlags>(ImGuiWindowFlags_NoCollapse));
-    Speedometer.Style.WindowRounding = Settings::GetSetting({ "Speedometer", "Style", "WindowRounding" }, 5.0f);
-    Speedometer.Style.WindowBorderSize = Settings::GetSetting({ "Speedometer", "Style", "WindowBorderSize" }, 0.0f);
-
-    // Default colors from the ImGui's Dark Theme
-    Speedometer.Style.Colors[ImGuiCol_Border] = JsonToImVec4(Settings::GetSetting({ "Speedometer", "Style", "BorderColor" }, ImVec4ToJson(ImVec4(0.43f, 0.43f, 0.50f, 0.50f))));
-    Speedometer.Style.Colors[ImGuiCol_TitleBg] = JsonToImVec4(Settings::GetSetting({ "Speedometer", "Style", "TitleBackgroundColor" }, ImVec4ToJson(ImVec4(0.16f, 0.29f, 0.48f, 0.7f))));
-    Speedometer.Style.Colors[ImGuiCol_TitleBgActive] = Speedometer.Style.Colors[ImGuiCol_TitleBg];
-    Speedometer.Style.Colors[ImGuiCol_WindowBg] = JsonToImVec4(Settings::GetSetting({ "Speedometer", "Style", "WindowBackgroundColor" }, ImVec4ToJson(ImVec4(0.0f, 0.0f, 0.0f, 0.5f))));
-
-    for (size_t i = 0; i < Items.size() && loadItemColors; i++)
-    {
-        Items[i]->LabelColor = JsonToImVec4(Settings::GetSetting({ "Speedometer", "Item", Items[i]->ItemName, "LabelColor" }, ImVec4ToJson(ImVec4(1.0f, 1.0f, 1.0f, 1.0f))));
-        Items[i]->ValueColor = JsonToImVec4(Settings::GetSetting({ "Speedometer", "Item", Items[i]->ItemName, "ValueColor" }, ImVec4ToJson(ImVec4(1.0f, 1.0f, 1.0f, 1.0f))));
-    }
-}
-
-static void InitializeSpeedometer()
-{
-    static bool initialized = false;
-
-    if (!initialized)
-    {
-        initialized = true;
-
-        Items.clear();
-        Items.push_back(&LocationX);
-        Items.push_back(&LocationY);
-        Items.push_back(&LocationZ);
-        Items.push_back(&TopHeight);
-        Items.push_back(&Speed);
-        Items.push_back(&TopSpeed);
-        Items.push_back(&Pitch);
-        Items.push_back(&Yaw);
-        Items.push_back(&Checkpoint);
-        Items.push_back(&MovementState);
-        Items.push_back(&Health);
-        Items.push_back(&ReactionTime);
-        Items.push_back(&LastJumpLocation);
-        Items.push_back(&LastJumpLocationDelta);
-
-        int index = 0;
-        LocationX.SetNameAndDefaults("Location X", "X", index);
-        LocationY.SetNameAndDefaults("Location Y", "Y", index);
-        LocationZ.SetNameAndDefaults("Location Z", "Z", index);
-        TopHeight.SetNameAndDefaults("Top Height", "ZT", index);
-        Speed.SetNameAndDefaults("Speed", "V", index);
-        TopSpeed.SetNameAndDefaults("Top Speed", "VT", index);
-        Pitch.SetNameAndDefaults("Pitch", "RX", index);
-        Yaw.SetNameAndDefaults("Yaw", "RZ", index);
-        Checkpoint.SetNameAndDefaults("Checkpoint", "T", index);
-        MovementState.SetNameAndDefaults("Movement State", "S", index, "%d");
-        Health.SetNameAndDefaults("Health", "H", index, "%d");
-        ReactionTime.SetNameAndDefaults("Reaction Time", "RT", index);
-        LastJumpLocation.SetNameAndDefaults("Last Jump Location", "SZ", index);
-        LastJumpLocationDelta.SetNameAndDefaults("Last Jump Location Delta", "SZD", index);
-    }
-
-    // Check if there are any speedometer settings before loading from settings
-    bool foundSettings = Settings::GetSetting({ "Speedometer", "Item" }, json::object()).is_null();
-
-    for (size_t i = 0; i < Items.size(); i++)
-    {
-        // Pass the "i" for the DrawIndex default value
-        Items[i]->LoadSettings(i, foundSettings);
-    }
-
-    // If no settings were found, apply default settings
-    if (!foundSettings)
-    {
-        LocationX.ModifyDisplayedValue = true;
-        LocationX.Factor = 100;
-        LocationY.ModifyDisplayedValue = true;
-        LocationY.Factor = 100;
-        LocationZ.ModifyDisplayedValue = true;
-        LocationZ.Factor = 100;
-        TopHeight.AddSpaceBelow = true;
-        TopHeight.ModifyDisplayedValue = true;
-        TopHeight.Factor = 100;
-        Speed.ModifyDisplayedValue = true;
-        Speed.Multiply = true;
-        Speed.Factor = 0.036f;
-        TopSpeed.AddSpaceBelow = true;
-        TopSpeed.ModifyDisplayedValue = true;
-        TopSpeed.Multiply = true;
-        TopSpeed.Factor = 0.036f;
-        Yaw.AddSpaceBelow = true;
-        LastJumpLocation.ModifyDisplayedValue = true;
-        LastJumpLocation.Factor = 100;
-        LastJumpLocationDelta.ModifyDisplayedValue = true;
-        LastJumpLocationDelta.Factor = 100;
-
-        for (size_t i = 0; i < Items.size(); i++)
-        {
-            Items[i]->SaveSettings();
-        }
-    }
-
-    SortItemsOrder();
-}
-
 static void ProcessHotkey(const char* label, int* key, const std::vector<std::string> settings, const int defaultValue)
 {
     if (settings.empty())
@@ -851,18 +385,39 @@ static void TrainerTab()
 {
     ImGui::SeparatorText("Speedometer##Speedometer-Separator");
     {
-        if (ImGui::Checkbox("Enabled##Speedometer-Enabled", &Speedometer.Show)) 
+        if (ImGui::Checkbox("Enabled##Speedometer-Enabled", &speedometer.Show)) 
         {
-            Settings::SetSetting({ "Speedometer", "Settings", "Show" }, Speedometer.Show);
+            Settings::SetSetting({ "Speedometer", "Settings", "Show" }, speedometer.Show);
         }
 
-        if (Speedometer.Show)
+        if (speedometer.Show)
         {
-            ImGui::Checkbox("Edit Window##Speedometer-EditWindow", &Speedometer.ShowEditWindow);
-            ImGui::HelpMarker("Change the apperance of the speedometer");
+            if (ImGui::Checkbox("Classic##Speedometer-Classic", &speedometer.ShowClassic))
+            {
+                Settings::SetSetting({ "Speedometer", "Settings", "Classic", "Show" }, speedometer.ShowClassic);
+            }
+            ImGui::HelpMarker("Draws the old version of speedometer with less customizeable options");
 
-            ImGui::Checkbox("Edit Items##Speedometer-EditItems", &Speedometer.ShowItemEditorWindow);
-            ImGui::HelpMarker("Change an item's order, text, colors, formatting, and etc");
+            if (!speedometer.ShowClassic)
+            {
+                ImGui::Checkbox("Edit Window##Speedometer-EditWindow", &speedometer.ShowEditWindow);
+                ImGui::HelpMarker("Change the apperance of the speedometer");
+
+                ImGui::Checkbox("Edit Items##Speedometer-EditItems", &speedometer.ShowItemEditorWindow);
+                ImGui::HelpMarker("Change an item's order, text, colors, formatting, and etc");
+            }
+            else
+            {
+                if (ImGui::Checkbox("Show Top Height Info##Speedometer-ShowTopHeightInfo", &speedometer.ShowTopHeightInfo))
+                {
+                    Settings::SetSetting({ "Speedometer", "Settings", "Classic", "ShowTopHeightInfo" }, speedometer.ShowTopHeightInfo);
+                }
+
+                if (ImGui::Checkbox("Show Extra Player Info##Speedometer-ShowExtraPlayerInfo", &speedometer.ShowExtraPlayerInfo))
+                {
+                    Settings::SetSetting({ "Speedometer", "Settings", "Classic", "ShowExtraPlayerInfo" }, speedometer.ShowExtraPlayerInfo);
+                }
+            }
         }
     }
 
@@ -872,8 +427,8 @@ static void TrainerTab()
         {
             Settings::SetSetting({ "Trainer", "Enabled" }, Enabled);
 
-            CheckpointTime = 0.0f;
-            CheckpointUpdateTimer = false;
+            speedometer.CheckpointTime = 0.0f;
+            speedometer.CheckpointUpdateTimer = false;
         }
 
         if (Enabled)
@@ -928,7 +483,7 @@ static void TrainerTab()
                 }
             }
 
-            if (HasCheckpoint) 
+            if (speedometer.HasCheckpoint)
             {
                 if (HasSave || sepatatorAdded)
                 {
@@ -941,9 +496,9 @@ static void TrainerTab()
 
                 if (ImGui::Button("Reset Checkpoint##Trainer-ResetCheckpoint")) 
                 {
-                    CheckpointTime = 0.0f;
-                    CheckpointUpdateTimer = false;
-                    HasCheckpoint = false;
+                    speedometer.CheckpointTime = 0.0f;
+                    speedometer.CheckpointUpdateTimer = false;
+                    speedometer.HasCheckpoint = false;
                 }
             }
         }
@@ -1022,281 +577,7 @@ static void TrainerTab()
 
 static void OnRender(IDirect3DDevice9* device)
 {
-    if (Speedometer.Show)
-    {
-        if (Speedometer.ShowEditWindow)
-        {
-            static float valueOffset = 128.0f;
-            static ImVec4 valueColor(1.0f, 1.0f, 1.0f, 1.0f);
-            static ImVec4 labelColor(1.0f, 1.0f, 1.0f, 1.0f);
-
-            ImGui::SetNextWindowPos(ImVec2(60, 60), ImGuiCond_FirstUseEver);
-            ImGui::SetNextWindowSize(ImVec2(470, 478), ImGuiCond_FirstUseEver);
-            ImGui::BeginWindow("Edit Speedometer Window##speedometer-edit-window", &Speedometer.ShowEditWindow, ImGuiWindowFlags_NoCollapse);
-            ImGui::SeparatorText("Flags");
-            {
-                ImGui::CheckboxFlags("No Title Bar", &Speedometer.WindowFlags, ImGuiWindowFlags_NoTitleBar);
-                ImGui::CheckboxFlags("No Resize", &Speedometer.WindowFlags, ImGuiWindowFlags_NoResize);
-                ImGui::Checkbox("No Close", &Speedometer.HideCloseButton);
-            }
-
-            ImGui::SeparatorText("Variables");
-            {
-                ImGui::SliderFloat("Rounding", &Speedometer.Style.WindowRounding, 0.0f, 16.0f, "%.2f");
-                ImGui::SliderFloat("Border Size", &Speedometer.Style.WindowBorderSize, 0.0f, 2.0f, "%.2f");
-            }
-
-            ImGui::SeparatorText("Colors");
-            {
-                if (ImGui::ColorEdit4("Title Background", &Speedometer.Style.Colors[ImGuiCol_TitleBg].x, ImGuiColorEditFlags_AlphaPreviewHalf))
-                {
-                    Speedometer.Style.Colors[ImGuiCol_TitleBgActive] = Speedometer.Style.Colors[ImGuiCol_TitleBg];
-                }
-                ImGui::ColorEdit4("Window Background", &Speedometer.Style.Colors[ImGuiCol_WindowBg].x, ImGuiColorEditFlags_AlphaPreviewHalf);
-                ImGui::ColorEdit4("Window Border", &Speedometer.Style.Colors[ImGuiCol_Border].x, ImGuiColorEditFlags_AlphaPreviewHalf);
-            }
-
-            ImGui::SeparatorText("Overrides");
-            {
-                if (ImGui::ColorEdit4("Label Color", &labelColor.x, ImGuiColorEditFlags_AlphaPreviewHalf))
-                {
-                    for (size_t i = 0; i < Items.size(); i++)
-                    {
-                        Items[i]->LabelColor = labelColor;
-                    }
-                }
-
-                if (ImGui::ColorEdit4("Value Color", &valueColor.x, ImGuiColorEditFlags_AlphaPreviewHalf))
-                {
-                    for (size_t i = 0; i < Items.size(); i++)
-                    {
-                        Items[i]->ValueColor = valueColor;
-                    }
-                }
-
-                if (ImGui::DragFloat("Value Offset", &valueOffset))
-                {
-                    for (size_t i = 0; i < Items.size(); i++)
-                    {
-                        Items[i]->ValueOffset = valueOffset;
-                    }
-                }
-            }
-
-            ImGui::SeparatorText("Buttons##Speedometer-Edit-Button-Separator");
-            {
-                if (ImGui::Button("Save##Speedometer-Edit-Save"))
-                {
-                    SaveSpeedometerWindowSettings(true);
-                }
-                ImGui::SameLine();
-
-                if (ImGui::Button("Undo##Speedometer-Edit-Undo"))
-                {
-                    LoadSpeedometerWindowSettings(true);
-
-                    valueOffset = 128.0f;
-                    valueColor = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
-                    labelColor = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
-                }
-                ImGui::SameLine();
-
-                if (ImGui::Button("Reset##Speedometer-Edit-Reset"))
-                {
-                    Settings::SetSetting({ "Speedometer", "Style" }, json::object());
-
-                    LoadSpeedometerWindowSettings(false);
-                    SaveSpeedometerWindowSettings(false);
-
-                    valueOffset = 128.0f;
-                    valueColor = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
-                    labelColor = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
-                }
-            }
-
-            ImGui::End();
-        }
-
-        if (Speedometer.ShowItemEditorWindow)
-        {
-            static size_t selectedIndex = -1;
-
-            ImGui::SetNextWindowPos(ImVec2(60, 60), ImGuiCond_FirstUseEver);
-            ImGui::SetNextWindowSize(ImVec2(322, 407), ImGuiCond_FirstUseEver);
-            ImGui::BeginWindow("Edit Speedometer Items##speedometer-edit-items", &Speedometer.ShowItemEditorWindow, ImGuiWindowFlags_NoCollapse);
-            ImGui::SeparatorText("Items");
-            {
-                int itemIndexSelected = -1;
-                int itemIndexToSwapWith = -1;
-
-                // FIXME: The button size doesn't match perfectly and size 17.5 is close enough but would like it to be perfectly sized
-                const auto selectableSize = ImVec2(256, 0);
-                const auto buttonSize = ImVec2(17.5f, 17.5f);
-
-                for (size_t i = 0; i < Items.size(); i++)
-                {
-                    if (ImGui::Selectable((Items[i]->ItemName + "##speedometer-edit-item-" + std::to_string(i)).c_str(), i == selectedIndex, 0, selectableSize))
-                    {
-                        if (i == selectedIndex)
-                        {
-                            selectedIndex = -1;
-                        }
-                        else
-                        {
-                            selectedIndex = i;
-                        }
-                    }
-
-                    ImGui::SameLine();
-                    if (i == 0)
-                    {
-                        ImGui::BeginDisabled();
-                        ImGui::SmallArrowButton("", ImGuiDir_Up, buttonSize);
-                        ImGui::EndDisabled();
-                    }
-                    else if (ImGui::SmallArrowButton(("##speedometer-edit-item-arrow-up-" + std::to_string(i)).c_str(), ImGuiDir_Up, buttonSize))
-                    {
-                        itemIndexSelected = i;
-                        itemIndexToSwapWith = i - 1;
-                    }
-
-                    ImGui::SameLine();
-                    if (i == Items.size() - 1)
-                    {
-                        ImGui::BeginDisabled();
-                        ImGui::SmallArrowButton("", ImGuiDir_Down, buttonSize);
-                        ImGui::EndDisabled();
-                    }
-                    else if (ImGui::SmallArrowButton(("##speedometer-edit-item-arrow-down-" + std::to_string(i)).c_str(), ImGuiDir_Down, buttonSize))
-                    {
-                        itemIndexSelected = i;
-                        itemIndexToSwapWith = i + 1;
-                    }
-                }
-
-                if (itemIndexSelected != -1)
-                {
-                    std::swap(Items[itemIndexSelected], Items[itemIndexToSwapWith]);
-
-                    // We swapped everything but we don't want to swap the position index
-                    int temp = Items[itemIndexToSwapWith]->PositionIndex;
-                    Items[itemIndexToSwapWith]->PositionIndex = Items[itemIndexSelected]->PositionIndex;
-                    Items[itemIndexSelected]->PositionIndex = temp;
-
-                    if (itemIndexSelected == selectedIndex || itemIndexToSwapWith == selectedIndex)
-                    {
-                        selectedIndex = itemIndexToSwapWith;
-                    }
-                }
-
-                if (selectedIndex != -1)
-                {
-                    ImGui::BeginWindow("Edit Item##Speedometer-Edit-Item", nullptr, ImGuiWindowFlags_NoCollapse);
-                    {
-                        bool needsToReorderItems = false;
-                        Items[selectedIndex]->Edit(needsToReorderItems);
-
-                        if (needsToReorderItems)
-                        {
-                            SortItemsOrder();
-                        }
-                    }
-
-                    ImGui::End();
-                }
-            }
-
-            ImGui::SeparatorText("Buttons##Speedometer-Edit-Items-Separator");
-            {
-                if (ImGui::Button("Save All##Speedometer-Edit-SaveItems"))
-                {
-                    for (size_t i = 0; i < Items.size(); i++)
-                    {
-                        Items[i]->SaveSettings();
-                    }
-                }
-                ImGui::SameLine();
-
-                if (ImGui::Button("Undo All##Speedometer-Edit-UndoItems"))
-                {
-                    for (size_t i = 0; i < Items.size(); i++)
-                    {
-                        Items[i]->LoadSettings(Items[i]->DrawIndex, false, true);
-                    }
-
-                    SortItemsOrder();
-                }
-                ImGui::SameLine();
-
-                if (ImGui::Button("Reset All##Speedometer-Edit-ResetItems"))
-                {
-                    Settings::SetSetting({ "Speedometer", "Item" }, json::object());
-
-                    selectedIndex = -1;
-                    InitializeSpeedometer();
-                }
-            }
-
-            ImGui::End();
-        }
-
-        const auto pawn = Engine::GetPlayerPawn();
-        const auto controller = Engine::GetPlayerController();
-
-        if (pawn && controller)
-        {
-            ImGui::PushStyleColor(ImGuiCol_TitleBg, Speedometer.Style.Colors[ImGuiCol_TitleBg]);
-            ImGui::PushStyleColor(ImGuiCol_TitleBgActive, Speedometer.Style.Colors[ImGuiCol_TitleBg]);
-            ImGui::PushStyleColor(ImGuiCol_WindowBg, Speedometer.Style.Colors[ImGuiCol_WindowBg]);
-            ImGui::PushStyleColor(ImGuiCol_Border, Speedometer.Style.Colors[ImGuiCol_Border]);
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, Speedometer.Style.WindowBorderSize);
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, Speedometer.Style.WindowRounding);
-
-            ImGui::SetNextWindowPos(ImVec2(60, 60), ImGuiCond_FirstUseEver);
-            ImGui::SetNextWindowSize(ImVec2(190, 345), ImGuiCond_FirstUseEver);
-            ImGui::BeginWindow("Speedometer##trainer-speedometer", Speedometer.HideCloseButton ? nullptr : &Speedometer.Show, Speedometer.WindowFlags);
-
-            const float speed = sqrtf(powf(pawn->Velocity.X, 2) + powf(pawn->Velocity.Y, 2));
-            const float pitch = static_cast<float>(controller->Rotation.Pitch % 0x10000) / static_cast<float>(0x10000) * 360.0f;
-            const float yaw = static_cast<float>(controller->Rotation.Yaw % 0x10000) / static_cast<float>(0x10000) * 360.0f;
-
-            TopSpeedTracker.Update(speed);
-            TopHeightTracker.Update(pawn->Location.Z);
-
-            for (size_t i = 0; i < Items.size(); i++)
-            {
-                switch (Items[i]->DrawIndex)
-                {
-                    case 0: Items[i]->Draw(pawn->Location.X); break;
-                    case 1: Items[i]->Draw(pawn->Location.Y); break;
-                    case 2: Items[i]->Draw(pawn->Location.Z); break;
-                    case 3: Items[i]->Draw(TopHeightTracker.Value); break;
-                    case 4: Items[i]->Draw(speed); break;
-                    case 5: Items[i]->Draw(TopSpeedTracker.Value); break;
-                    case 6: Items[i]->Draw(pitch); break;
-                    case 7: Items[i]->Draw(yaw); break;
-                    case 8: Items[i]->Draw(CheckpointTime); break;
-                    case 9: Items[i]->Draw(static_cast<int>(pawn->MovementState.GetValue())); break;
-                    case 10: Items[i]->Draw(pawn->Health); break;
-                    case 11: Items[i]->Draw(min(100.0f, controller->ReactionTimeEnergy)); break;
-                    case 12: Items[i]->Draw(pawn->LastJumpLocation.Z); break;
-                    case 13: Items[i]->Draw(pawn->Location.Z - pawn->LastJumpLocation.Z); break;
-                    default: 
-                        printf("Unknown DrawIndex \"%d\" (Min = 0, Max = %d)\n", Items[i]->DrawIndex, Items.size()); 
-                        break;
-                }
-            }
-
-            ImGui::End();
-            ImGui::PopStyleColor(4);
-            ImGui::PopStyleVar(2);
-        }
-        else
-        {
-            TopSpeedTracker.Reset();
-            TopHeightTracker.Reset();
-        }
-    }
+    speedometer.OnRender();
 
     if (Enabled && ShowToolActivatedOverlay)
     {
@@ -1323,7 +604,7 @@ static void OnRender(IDirect3DDevice9* device)
 
 static void OnTick(const float deltaTime) 
 {
-    if (!Enabled && !Speedometer.Show) 
+    if (!Enabled && !speedometer.Show) 
     {
         return;
     }
@@ -1334,24 +615,24 @@ static void OnTick(const float deltaTime)
         return;
     }
 
-    if (Speedometer.Show) 
+    if (speedometer.Show) 
     {
         if (Engine::IsKeyDown(CheckpointKeybind)) 
         {
-            HasCheckpoint = true;
-            CheckpointTime = 0.0f;
-            CheckpointLocation = pawn->Location;
+            speedometer.HasCheckpoint = true;
+            speedometer.CheckpointTime = 0.0f;
+            speedometer.CheckpointLocation = pawn->Location;
         } 
 
-        if (HasCheckpoint) 
+        if (speedometer.HasCheckpoint)
         {
-            if (Distance(pawn->Location, CheckpointLocation) > 1.0f && CheckpointUpdateTimer) 
+            if (Distance(pawn->Location, speedometer.CheckpointLocation) > 1.0f && speedometer.CheckpointUpdateTimer)
             {
-                CheckpointTime += pawn->WorldInfo->TimeDilation * deltaTime;
+                speedometer.CheckpointTime += pawn->WorldInfo->TimeDilation * deltaTime;
             } 
             else 
             {
-                CheckpointUpdateTimer = false;
+                speedometer.CheckpointUpdateTimer = false;
             }
         }
     }
@@ -1393,10 +674,10 @@ static void OnTick(const float deltaTime)
             StrangToolActivated = false;
         }
 
-        if (HasCheckpoint) 
+        if (speedometer.HasCheckpoint)
         {
-            CheckpointTime = 0.0f;
-            CheckpointUpdateTimer = true;
+            speedometer.CheckpointTime = 0.0f;
+            speedometer.CheckpointUpdateTimer = true;
         }
 
         Load(save, pawn, controller);
@@ -1687,8 +968,8 @@ bool Trainer::Initialize()
     SidestepBeamerPressLeftKeybind = Settings::GetSetting({ "Trainer", "SidestepBeamer", "PressLeftKeybind" }, true);
     SidestepBeamerPressRightKeybind = Settings::GetSetting({ "Trainer", "SidestepBeamer", "PressRightKeybind" }, false);
 
-    InitializeSpeedometer();
-    LoadSpeedometerWindowSettings(false);
+    speedometer.Initialize();
+    speedometer.LoadWindowSettings(false);
 
     // Functions
     Menu::AddTab("Trainer", TrainerTab);
@@ -1705,15 +986,15 @@ bool Trainer::Initialize()
     {
         if (show == false) 
         {
-            Speedometer.WasEditWindowShown = Speedometer.ShowEditWindow;
-            Speedometer.WasEditItemShown = Speedometer.ShowItemEditorWindow;
-            Speedometer.ShowEditWindow = false;
-            Speedometer.ShowItemEditorWindow = false;
+            speedometer.WasEditWindowShown = speedometer.ShowEditWindow;
+            speedometer.WasEditItemShown = speedometer.ShowItemEditorWindow;
+            speedometer.ShowEditWindow = false;
+            speedometer.ShowItemEditorWindow = false;
         }
         else
         {
-            Speedometer.ShowEditWindow = Speedometer.WasEditWindowShown;
-            Speedometer.ShowItemEditorWindow = Speedometer.WasEditItemShown;
+            speedometer.ShowEditWindow = speedometer.WasEditWindowShown;
+            speedometer.ShowItemEditorWindow = speedometer.WasEditItemShown;
         }
     });
 
