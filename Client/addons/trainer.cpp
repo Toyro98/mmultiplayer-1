@@ -385,12 +385,12 @@ static void TrainerTab()
 {
     ImGui::SeparatorText("Speedometer##Speedometer-Separator");
     {
-        if (ImGui::Checkbox("Enabled##Speedometer-Enabled", &speedometer.Show)) 
+        if (ImGui::Checkbox("Enabled##Speedometer-Enabled", &speedometer.Enabled)) 
         {
-            Settings::SetSetting({ "Speedometer", "Settings", "Show" }, speedometer.Show);
+            Settings::SetSetting({ "Speedometer", "Settings", "Show" }, speedometer.Enabled);
         }
 
-        if (speedometer.Show)
+        if (speedometer.Enabled)
         {
             if (ImGui::Checkbox("Classic##Speedometer-Classic", &speedometer.ShowClassic))
             {
@@ -604,7 +604,7 @@ static void OnRender(IDirect3DDevice9* device)
 
 static void OnTick(const float deltaTime) 
 {
-    if (!Enabled && !speedometer.Show) 
+    if (!Enabled && !speedometer.Enabled) 
     {
         return;
     }
@@ -615,7 +615,7 @@ static void OnTick(const float deltaTime)
         return;
     }
 
-    if (speedometer.Show) 
+    if (speedometer.Enabled) 
     {
         if (Engine::IsKeyDown(CheckpointKeybind)) 
         {

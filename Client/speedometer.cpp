@@ -134,7 +134,7 @@ void Item::Edit(bool& needsToReorderItems)
     }
 }
 
-void Item::LoadSettings(size_t index, bool resetToDefaultPositionIndex, bool resetToPreviousPositionIndex)
+void Item::LoadSettings(const size_t index, const bool resetToDefaultPositionIndex, const bool resetToPreviousPositionIndex)
 {
     DrawIndex = Settings::GetSetting({ "Speedometer", "Item", ItemName, "DrawIndex" }, index);
 
@@ -184,7 +184,7 @@ void Item::SaveSettings()
     Settings::SetSetting({ "Speedometer", "Item", ItemName, "ValueColor" }, ImVec4ToJson(ValueColor));
 }
 
-void Item::SetNameAndDefaults(const std::string name, const std::string label, int& positionIndex, const std::string format)
+void Item::SetNameAndDefaults(const std::string &name, const std::string &label, int& positionIndex, const std::string &format)
 {
     ItemName = name;
     DefaultLabel = Label = label;
@@ -202,16 +202,16 @@ void Speedometer::SortItemsOrder()
     });
 }
 
-void Speedometer::SaveWindowSettings(bool saveItemColors)
+void Speedometer::SaveWindowSettings(const bool saveItemColors)
 {
-    Settings::SetSetting({ "Speedometer", "Settings", "Show" }, Show);
+    Settings::SetSetting({ "Speedometer", "Settings", "Show" }, Enabled);
     Settings::SetSetting({ "Speedometer", "Settings", "HideCloseButton" }, HideCloseButton);
     Settings::SetSetting({ "Speedometer", "Settings", "WindowFlags" }, WindowFlags);
     Settings::SetSetting({ "Speedometer", "Style", "WindowRounding" }, Style.WindowRounding);
     Settings::SetSetting({ "Speedometer", "Style", "WindowBorderSize" }, Style.WindowBorderSize);
-    Settings::SetSetting({ "Speedometer", "Style", "BorderColor" }, ImVec4ToJson(Style.Colors[ImGuiCol_Border]));
-    Settings::SetSetting({ "Speedometer", "Style", "TitleBackgroundColor" }, ImVec4ToJson(Style.Colors[ImGuiCol_TitleBg]));
-    Settings::SetSetting({ "Speedometer", "Style", "WindowBackgroundColor" }, ImVec4ToJson(Style.Colors[ImGuiCol_WindowBg]));
+    Settings::SetSetting({ "Speedometer", "Style", "BorderColor" }, ImVec4ToJson(Style.Border));
+    Settings::SetSetting({ "Speedometer", "Style", "TitleBackgroundColor" }, ImVec4ToJson(Style.TitleBg));
+    Settings::SetSetting({ "Speedometer", "Style", "WindowBackgroundColor" }, ImVec4ToJson(Style.WindowBg));
 
     for (size_t i = 0; i < Items.size() && saveItemColors; i++)
     {
@@ -220,23 +220,23 @@ void Speedometer::SaveWindowSettings(bool saveItemColors)
     }
 }
 
-void Speedometer::LoadWindowSettings(bool loadItemColors)
+void Speedometer::LoadWindowSettings(const bool loadItemColors)
 {
     ShowClassic = Settings::GetSetting({ "Speedometer", "Settings", "Classic", "Show" }, false);
     ShowTopHeightInfo = Settings::GetSetting({ "Speedometer", "Settings", "Classic", "ShowTopHeightInfo" }, false);
     ShowExtraPlayerInfo = Settings::GetSetting({ "Speedometer", "Settings", "Classic", "ShowExtraPlayerInfo" }, false);
 
-    Show = Settings::GetSetting({ "Speedometer", "Settings", "Show" }, false);
+    Enabled = Settings::GetSetting({ "Speedometer", "Settings", "Show" }, false);
     HideCloseButton = Settings::GetSetting({ "Speedometer", "Settings", "HideCloseButton" }, false);
     WindowFlags = Settings::GetSetting({ "Speedometer", "Settings", "WindowFlags" }, static_cast<ImGuiWindowFlags>(ImGuiWindowFlags_NoCollapse));
     Style.WindowRounding = Settings::GetSetting({ "Speedometer", "Style", "WindowRounding" }, 5.0f);
     Style.WindowBorderSize = Settings::GetSetting({ "Speedometer", "Style", "WindowBorderSize" }, 0.0f);
 
     // Default colors from the ImGui's Dark Theme
-    Style.Colors[ImGuiCol_Border] = JsonToImVec4(Settings::GetSetting({ "Speedometer", "Style", "BorderColor" }, ImVec4ToJson(ImVec4(0.43f, 0.43f, 0.50f, 0.50f))));
-    Style.Colors[ImGuiCol_TitleBg] = JsonToImVec4(Settings::GetSetting({ "Speedometer", "Style", "TitleBackgroundColor" }, ImVec4ToJson(ImVec4(0.16f, 0.29f, 0.48f, 0.7f))));
-    Style.Colors[ImGuiCol_TitleBgActive] = Style.Colors[ImGuiCol_TitleBg];
-    Style.Colors[ImGuiCol_WindowBg] = JsonToImVec4(Settings::GetSetting({ "Speedometer", "Style", "WindowBackgroundColor" }, ImVec4ToJson(ImVec4(0.0f, 0.0f, 0.0f, 0.5f))));
+    Style.Border = JsonToImVec4(Settings::GetSetting({ "Speedometer", "Style", "BorderColor" }, ImVec4ToJson(ImVec4(0.43f, 0.43f, 0.50f, 0.50f))));
+    Style.TitleBg = JsonToImVec4(Settings::GetSetting({ "Speedometer", "Style", "TitleBackgroundColor" }, ImVec4ToJson(ImVec4(0.16f, 0.29f, 0.48f, 0.7f))));
+    Style.TitleBgActive = Style.TitleBg;
+    Style.WindowBg = JsonToImVec4(Settings::GetSetting({ "Speedometer", "Style", "WindowBackgroundColor" }, ImVec4ToJson(ImVec4(0.0f, 0.0f, 0.0f, 0.5f))));
 
     for (size_t i = 0; i < Items.size() && loadItemColors; i++)
     {
@@ -331,7 +331,7 @@ void Speedometer::Initialize()
 
 void Speedometer::OnRender()
 {
-    if (!Show)
+    if (!Enabled)
     {
         return;
     }
@@ -349,11 +349,6 @@ void Speedometer::OnRender()
         }
     }
 
-    Draw();
-}
-
-void Speedometer::Draw()
-{
     const auto pawn = Engine::GetPlayerPawn();
     const auto controller = Engine::GetPlayerController();
 
@@ -374,13 +369,13 @@ void Speedometer::Draw()
     if (ShowClassic)
     {
         static const float padding = 5.0f;
-        static const float rightPadding = 110.0f; 
-        
+        static const float rightPadding = 110.0f;
+
         auto window = ImGui::BeginRawScene("##trainer-speedometer");
         auto& io = ImGui::GetIO();
-        float width = io.DisplaySize.x - padding; 
+        float width = io.DisplaySize.x - padding;
         float yIncrement = ImGui::GetTextLineHeight();
-        
+
         static int amountOfItems = Items.size() - 1;
         static int amountOfExtraPlayerInfoItems = 5;
         int count = (ShowTopHeightInfo ? 1 : 0) + (ShowExtraPlayerInfo ? amountOfItems : amountOfItems - amountOfExtraPlayerInfoItems);
@@ -388,7 +383,7 @@ void Speedometer::Draw()
 
         window->DrawList->AddRectFilled(ImVec2(width - rightPadding - padding, y - (padding / 2)), io.DisplaySize, ImColor(ImVec4(0, 0, 0, 0.4f)));
 
-        auto addTextToDrawList = [&](auto value, const char* label, const char* format, float yIncrement)
+        auto addTextToDrawList = [&](const auto value, const char* label, const char* format, const float yIncrement)
         {
             char buffer[0x1F]{};
             sprintf_s(buffer, format, value);
@@ -403,20 +398,20 @@ void Speedometer::Draw()
         addTextToDrawList(pawn->Location.Y / 100.0f, "Y", "%.2f", yIncrement);
         addTextToDrawList(pawn->Location.Z / 100.0f, "Z", "%.2f", yIncrement + (ShowTopHeightInfo ? 0 : yIncrement / 2));
 
-        if (ShowTopHeightInfo) 
+        if (ShowTopHeightInfo)
         {
             addTextToDrawList(TopHeightTracker.GetValue() / 100.0f, "ZT", "%.2f", yIncrement + yIncrement / 2);
         }
 
         addTextToDrawList(speed * 0.036f, "V", "%.2f", yIncrement);
-        addTextToDrawList(TopSpeedTracker.GetValue(), "VT", "%.2f", yIncrement + yIncrement / 2);
+        addTextToDrawList(TopSpeedTracker.GetValue() * 0.036f, "VT", "%.2f", yIncrement + yIncrement / 2);
 
         pitch = pitch == 0.0f ? pitch : pitch > 180.0f ? pitch - 360.0f + 0.01f : pitch + 0.01f;
         addTextToDrawList(pitch, "RX", "%.2f", yIncrement);
         addTextToDrawList(yaw, "RY", "%.2f", yIncrement + yIncrement / 2);
         addTextToDrawList(CheckpointTime, "T", "%.2f", yIncrement);
 
-        if (ShowExtraPlayerInfo) 
+        if (ShowExtraPlayerInfo)
         {
             addTextToDrawList(pawn->MovementState.GetValue(), "S", "%d", yIncrement);
             addTextToDrawList(pawn->Health, "H", "%d", yIncrement);
@@ -429,16 +424,16 @@ void Speedometer::Draw()
     }
     else
     {
-        ImGui::PushStyleColor(ImGuiCol_TitleBg, Style.Colors[ImGuiCol_TitleBg]);
-        ImGui::PushStyleColor(ImGuiCol_TitleBgActive, Style.Colors[ImGuiCol_TitleBg]);
-        ImGui::PushStyleColor(ImGuiCol_WindowBg, Style.Colors[ImGuiCol_WindowBg]);
-        ImGui::PushStyleColor(ImGuiCol_Border, Style.Colors[ImGuiCol_Border]);
+        ImGui::PushStyleColor(ImGuiCol_TitleBg, Style.TitleBg);
+        ImGui::PushStyleColor(ImGuiCol_TitleBgActive, Style.TitleBg);
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, Style.WindowBg);
+        ImGui::PushStyleColor(ImGuiCol_Border, Style.Border);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, Style.WindowBorderSize);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, Style.WindowRounding);
 
         ImGui::SetNextWindowPos(ImVec2(60, 60), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(190, 345), ImGuiCond_FirstUseEver);
-        ImGui::BeginWindow("Speedometer##trainer-speedometer", HideCloseButton ? nullptr : &Show, WindowFlags);
+        ImGui::BeginWindow("Speedometer##trainer-speedometer", HideCloseButton ? nullptr : &Enabled, WindowFlags);
 
         for (size_t i = 0; i < Items.size(); i++)
         {
@@ -494,12 +489,12 @@ void Speedometer::DrawEditorWindow()
 
     ImGui::SeparatorText("Colors");
     {
-        if (ImGui::ColorEdit4("Title Background", &Style.Colors[ImGuiCol_TitleBg].x, ImGuiColorEditFlags_AlphaPreviewHalf))
+        if (ImGui::ColorEdit4("Title Background", &Style.TitleBg.x, ImGuiColorEditFlags_AlphaPreviewHalf))
         {
-            Style.Colors[ImGuiCol_TitleBgActive] = Style.Colors[ImGuiCol_TitleBg];
+            Style.TitleBgActive = Style.TitleBg;
         }
-        ImGui::ColorEdit4("Window Background", &Style.Colors[ImGuiCol_WindowBg].x, ImGuiColorEditFlags_AlphaPreviewHalf);
-        ImGui::ColorEdit4("Window Border", &Style.Colors[ImGuiCol_Border].x, ImGuiColorEditFlags_AlphaPreviewHalf);
+        ImGui::ColorEdit4("Window Background", &Style.WindowBg.x, ImGuiColorEditFlags_AlphaPreviewHalf);
+        ImGui::ColorEdit4("Window Border", &Style.Border.x, ImGuiColorEditFlags_AlphaPreviewHalf);
     }
 
     ImGui::SeparatorText("Overrides");

@@ -36,18 +36,20 @@ public:
     void Update(const T current)
     {
         const auto pawn = Engine::GetPlayerPawn();
-        if (pawn)
+        if (!pawn)
         {
-            if (pawn->WorldInfo->RealTimeSeconds - TimeHit > ResetAfterSeconds)
-            {
-                Reset();
-            }
+            return;
+        }
 
-            if (current > Value)
-            {
-                Value = current;
-                TimeHit = pawn->WorldInfo->RealTimeSeconds;
-            }
+        if (pawn->WorldInfo->RealTimeSeconds - TimeHit > ResetAfterSeconds)
+        {
+            Reset();
+        }
+
+        if (current > Value)
+        {
+            Value = current;
+            TimeHit = pawn->WorldInfo->RealTimeSeconds;
         }
     }
 };
@@ -55,28 +57,26 @@ public:
 class Item
 {
 public:
-    int DrawIndex;
-    int PositionIndex;
+    short DrawIndex;
+    short PositionIndex;
+    float Factor;
+    float Height;
+    float ValueOffset;
     bool IsVisible;
     bool ModifyDisplayedValue;
     bool Multiply;
-    float Factor;
     bool AddSpaceBelow;
-    float Height;
-    float ValueOffset;
-
     std::string ItemName;
     std::string Label;
     std::string Format;
-
     ImVec4 LabelColor;
     ImVec4 ValueColor;
 
 private:
     char LabelBuffer[32];
     char FormatBuffer[32];
-    int DefaultPositionIndex;
-    int PreviousPositionIndex;
+    short DefaultPositionIndex;
+    short PreviousPositionIndex;
     std::string DefaultLabel;
     std::string DefaultFormat;
 
@@ -116,25 +116,39 @@ public:
     }
 
     void Edit(bool& needsToReorderItems);
-    void LoadSettings(size_t index, bool resetToDefaultPositionIndex = false, bool resetToPreviousPositionIndex = false);
+    void LoadSettings(const size_t index, const bool resetToDefaultPositionIndex = false, const bool resetToPreviousPositionIndex = false);
     void SaveSettings();
-    void SetNameAndDefaults(const std::string name, const std::string label, int& positionIndex, const std::string format = "%.2f");
+    void SetNameAndDefaults(const std::string &name, const std::string &label, int& positionIndex, const std::string &format = "%.2f");
 };
 
 class Speedometer
 {
 public:
-    bool Show = false;
+    bool Enabled = false;
     bool HideCloseButton = false;
+    bool ShowClassic = false;
+    bool ShowTopHeightInfo = false;
+    bool ShowExtraPlayerInfo = false;
     bool ShowEditWindow = false;
     bool ShowItemEditorWindow = false;
     bool WasEditWindowShown = false;
     bool WasEditItemShown = false;
-    ImGuiWindowFlags WindowFlags;
-    ImGuiStyle Style;
-    bool ShowClassic = false;
-    bool ShowTopHeightInfo = false;
-    bool ShowExtraPlayerInfo = false;
+
+// ImGui
+private:
+    // Instead of using ImGuiStyle using 1094 bytes, we create this with the styling we only use
+    struct Style
+    {
+        ImVec4 TitleBg;
+        ImVec4 TitleBgActive;
+        ImVec4 WindowBg;
+        ImVec4 Border;
+        float WindowBorderSize;
+        float WindowRounding;
+    };
+
+    ImGuiWindowFlags WindowFlags = ImGuiWindowFlags_None;
+    Style Style;
 
 private:
     Item LocationX;
@@ -151,25 +165,24 @@ private:
     Item ReactionTime;
     Item LastJumpLocation;
     Item LastJumpLocationDelta;
-    std::vector<Item*> Items;
     Tracker<float> TopHeightTracker;
     Tracker<float> TopSpeedTracker; 
+    std::vector<Item*> Items;
 
 public:
     bool HasCheckpoint = false;
-    float CheckpointTime = 0.0f;
     bool CheckpointUpdateTimer = false;
-    Classes::FVector CheckpointLocation;
+    float CheckpointTime = 0.0f;
+    Classes::FVector CheckpointLocation = {};
 
 public:
     void SortItemsOrder(); 
-    void SaveWindowSettings(bool saveItemColors); 
-    void LoadWindowSettings(bool loadItemColors);
+    void SaveWindowSettings(const bool saveItemColors);
+    void LoadWindowSettings(const bool loadItemColors);
     void Initialize();
     void OnRender();
 
 private:
-    void Draw();
     void DrawEditorWindow();
     void DrawItemEditorWindow();
 };
